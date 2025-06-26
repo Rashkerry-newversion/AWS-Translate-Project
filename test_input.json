@@ -1,0 +1,12 @@
+[
+  {
+    "Text": "Hello, how are you?",
+    "SourceLanguageCode": "en",
+    "TargetLanguageCode": "fr"
+  },
+  {
+    "Text": "I am learning AWS.",
+    "SourceLanguageCode": "en",
+    "TargetLanguageCode": "es"
+  }
+]
