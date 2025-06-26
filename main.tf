@@ -1,92 +1,101 @@
+# main.tf
+# This Terraform configuration provisions the necessary AWS resources for the
+# automated text processing pipeline.
+
 # Specify the AWS provider and region
 provider "aws" {
-  region = "us-east-1" 
+  region = "us-east-1" # You can change this to your preferred AWS region
 }
 
 # -----------------------------------------------------------------------------
 # 1. S3 Buckets
 # -----------------------------------------------------------------------------
 
-# S3 Bucket for Input Files
+# S3 Bucket for Input Files - now with a fun, unique name!
 resource "aws_s3_bucket" "input_files_bucket" {
-  
-  bucket = "whisper-scrolls-${var.bucket_name_suffix}" 
-  acl    = "private" # Restrict public access by default
-
-  # Enable versioning to keep a history of objects.
-  versioning {
-    enabled = true
-  }
-
-  # Lifecycle rule to automatically delete old objects after 90 days.
-  lifecycle_rule {
-    id      = "delete_old_objects"
-    enabled = true
-
-    expiration {
-      days = 90 # Objects will be deleted after 90 days
-    }
-  }
+  bucket = "whisper-scrolls-${var.bucket_name_suffix}" # Fun: where the input secrets (text) are placed
+  #acl    = "private" # Restrict public access by default
 
   tags = {
     Project = "CapstoneTextProcessor"
-    Purpose = "DataIngestion"
+    Purpose = "DataIngestion" # More generic purpose
+  }
+}
+
+# S3 Bucket Lifecycle Configuration for Input Files
+resource "aws_s3_bucket_lifecycle_configuration" "input_files_bucket_lifecycle" {
+  bucket = aws_s3_bucket.input_files_bucket.id # Reference the bucket ID
+
+  rule {
+    id     = "DeleteOldObjects"
+    status = "Enabled"
+    expiration {
+      days = 90 # Objects will be deleted after 90 days
+    }
+    # Optional: Enable versioning management if needed
+    noncurrent_version_expiration {
+      noncurrent_days = 90
+    }
   }
 }
 
 # S3 Bucket for Processed Output Results - now with a fun, unique name!
 resource "aws_s3_bucket" "output_results_bucket" {
-  # S3 bucket names must be globally unique across all of AWS.
   bucket = "echo-reverie-${var.bucket_name_suffix}" # Fun: where the processed results echo out
-  acl    = "private"
-
-  versioning {
-    enabled = true
-  }
-
-  lifecycle_rule {
-    id      = "delete_old_objects"
-    enabled = true
-
-    expiration {
-      days = 90
-    }
-  }
+  #acl    = "private"
 
   tags = {
     Project = "CapstoneTextProcessor"
-    Purpose = "ProcessedDataOutput"
+    Purpose = "ProcessedDataOutput" # More generic purpose
+  }
+}
+
+# S3 Bucket Lifecycle Configuration for Output Results
+resource "aws_s3_bucket_lifecycle_configuration" "output_results_bucket_lifecycle" {
+  bucket = aws_s3_bucket.output_results_bucket.id # Reference the bucket ID
+
+  rule {
+    id     = "DeleteOldObjects"
+    status = "Enabled"
+    expiration {
+      days = 90
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 90
+    }
   }
 }
 
 # S3 Bucket to store Lambda deployment packages (artifacts) - now with a fun, unique name!
 resource "aws_s3_bucket" "lambda_code_bucket" {
-  # S3 bucket names must be globally unique across all of AWS.
   bucket = "star-forge-scripts-${var.bucket_name_suffix}" # Fun: where the magical Lambda code is stored
-  acl    = "private"
+  #acl    = "private"
 
-  # A lifecycle rule can be added if you want to clean up old Lambda deployment zips
-  lifecycle_rule {
-    id      = "delete_old_artifacts"
-    enabled = true
+  tags = {
+    Project = "CapstoneTextProcessor"
+    Purpose = "LambdaDeployments" # More generic purpose
+  }
+}
 
+# S3 Bucket Lifecycle Configuration for Lambda Code Artifacts
+resource "aws_s3_bucket_lifecycle_configuration" "lambda_code_bucket_lifecycle" {
+  bucket = aws_s3_bucket.lambda_code_bucket.id # Reference the bucket ID
+
+  rule {
+    id     = "DeleteOldArtifacts"
+    status = "Enabled"
     expiration {
       days = 30 # Delete old Lambda zips after 30 days
     }
   }
-
-  tags = {
-    Project = "CapstoneTextProcessor"
-    Purpose = "LambdaDeployments"
-  }
 }
-
 
 # -----------------------------------------------------------------------------
 # 2. IAM Role and Policy for Lambda
 # -----------------------------------------------------------------------------
 
-# IAM Role for the Lambda Function, this role defines what permissions the Lambda function will have when executed.
+# IAM Role for the Lambda Function
+# This role defines what permissions the Lambda function will have when executed.
 resource "aws_iam_role" "text_processor_lambda_role" {
   name = "text-processor-lambda-role-${var.bucket_name_suffix}"
 
@@ -132,16 +141,16 @@ resource "aws_iam_policy" "text_processor_lambda_policy" {
           "s3:GetObject",
         ]
         Effect   = "Allow"
-        Resource = "${aws_s3_bucket.input_files_bucket.arn}/*" # Referencing new bucket resource identifier
+        Resource = "${aws_s3_bucket.input_files_bucket.arn}/*" # Referencing input bucket
       },
       # Permissions to write objects to the output bucket
       {
         Action = [
           "s3:PutObject",
-          "s3:PutObjectAcl", 
+          "s3:PutObjectAcl", # Required for some S3 operations, ensures proper permissions
         ]
         Effect   = "Allow"
-        Resource = "${aws_s3_bucket.output_results_bucket.arn}/*" 
+        Resource = "${aws_s3_bucket.output_results_bucket.arn}/*" # Referencing output bucket
       },
       # Permissions to use AWS Translate (core functionality remains)
       {
@@ -149,7 +158,7 @@ resource "aws_iam_policy" "text_processor_lambda_policy" {
           "translate:TranslateText",
         ]
         Effect   = "Allow"
-        Resource = "*"
+        Resource = "*" # Translate API calls are generally not resource-specific
       },
     ]
   })
@@ -161,13 +170,16 @@ resource "aws_iam_policy" "text_processor_lambda_policy" {
 
 # Attach the policy to the IAM role
 resource "aws_iam_role_policy_attachment" "lambda_policy_attach" {
-  role       = aws_iam_role.text_processor_lambda_role.name 
-  policy_arn = aws_iam_policy.text_processor_lambda_policy.arn 
+  role       = aws_iam_role.text_processor_lambda_role.name # Referencing role
+  policy_arn = aws_iam_policy.text_processor_lambda_policy.arn # Referencing policy
 }
 
 # -----------------------------------------------------------------------------
 # 3. AWS Lambda Function
 # -----------------------------------------------------------------------------
+
+# Python Lambda code for text processing
+# The content is embedded directly as a local variable.
 locals {
   lambda_code = <<EOT
 import json
@@ -181,7 +193,7 @@ def lambda_handler(event, context):
     print(f"Received event: {json.dumps(event)}")
 
     try:
-        s3_record = event['Records'][0]['s3']
+        s3_record = event['Records'][0']['s3']
         source_bucket_name = s3_record['bucket']['name']
         source_object_key = s3_record['object']['key']
     except KeyError as e:
@@ -279,28 +291,34 @@ resource "local_file" "lambda_zip" {
 
 # Upload the Lambda zip file to the S3 artifacts bucket
 resource "aws_s3_object" "lambda_code_upload" {
-  bucket = aws_s3_bucket.lambda_code_bucket.bucket
+  bucket = aws_s3_bucket.lambda_code_bucket.bucket # Referencing bucket
   key    = "lambda_function.zip"
   source = local_file.lambda_zip.filename
-  etag   = filemd5(local_file.lambda_zip.filename)
+  # Fixed: Calculate ETag based on the content of the file, not its name.
+  # This ensures changes in the Lambda code trigger an update.
+  etag   = filemd5("${path.module}/lambda_function.zip")
 }
 
+
 # AWS Lambda Function for Text Processing
-resource "aws_lambda_function" "text_processor_lambda" { 
+resource "aws_lambda_function" "text_processor_lambda" {
   function_name    = "text-processor-lambda-${var.bucket_name_suffix}"
-  handler          = "index.lambda_handler" 
-  runtime          = "python3.9"            
-  role             = aws_iam_role.text_processor_lambda_role.arn 
-  timeout          = 30                     
-  memory_size      = 128                    
+  handler          = "index.lambda_handler" # Specifies the entry point in the Python code
+  runtime          = "python3.9"            # Or a later compatible Python runtime
+  role             = aws_iam_role.text_processor_lambda_role.arn # Referencing role
+  timeout          = 30                     # Maximum execution time in seconds
+  memory_size      = 128                    # Memory allocated to the Lambda function (MB)
 
   # Use the S3 object for the Lambda code
-  s3_bucket = aws_s3_bucket.lambda_code_bucket.bucket
+  s3_bucket = aws_s3_bucket.lambda_code_bucket.bucket # Referencing bucket
   s3_key    = aws_s3_object.lambda_code_upload.key
-  source_code_hash = aws_s3_object.lambda_code_upload.etag 
+  # Fixed: Calculate source_code_hash based on the content string directly.
+  # This ensures Lambda is updated when the embedded code changes.
+  source_code_hash = base64sha256(local.lambda_code)
+
   environment {
     variables = {
-      TARGET_BUCKET_NAME = aws_s3_bucket.output_results_bucket.bucket 
+      TARGET_BUCKET_NAME = aws_s3_bucket.output_results_bucket.bucket # Referencing bucket
     }
   }
 
@@ -317,20 +335,21 @@ resource "aws_lambda_function" "text_processor_lambda" {
 resource "aws_lambda_permission" "allow_s3_to_invoke_lambda" {
   statement_id  = "AllowS3InvokeLambda"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.text_processor_lambda.function_name 
+  function_name = aws_lambda_function.text_processor_lambda.function_name # Referencing lambda
   principal     = "s3.amazonaws.com"
-  source_arn    = aws_s3_bucket.input_files_bucket.arn
+  source_arn    = aws_s3_bucket.input_files_bucket.arn # Referencing bucket
 }
 
 # S3 Bucket Notification Configuration (Event Trigger)
+# This sets up the input-files-bucket to invoke the Lambda function
 resource "aws_s3_bucket_notification" "s3_bucket_notification" {
-  bucket = aws_s3_bucket.input_files_bucket.id 
+  bucket = aws_s3_bucket.input_files_bucket.id # Referencing bucket
 
   lambda_function {
-    lambda_function_arn = aws_lambda_function.text_processor_lambda.arn
-    events              = ["s3:ObjectCreated:*"] 
-    filter_prefix       = "input/" 
-    filter_suffix       = ".json" 
+    lambda_function_arn = aws_lambda_function.text_processor_lambda.arn # Referencing lambda
+    events              = ["s3:ObjectCreated:*"] # Trigger when any object is created
+    filter_prefix       = "input/" # Optional: Process only files in 'input/' prefix
+    filter_suffix       = ".json"  # Optional: Process only .json files
   }
 
   # Ensure the Lambda permission is created before setting the notification
@@ -345,7 +364,7 @@ resource "aws_s3_bucket_notification" "s3_bucket_notification" {
 variable "bucket_name_suffix" {
   description = "A unique suffix for the S3 bucket names (e.g., your initials, project name). This ensures global uniqueness and adds a fun touch."
   type        = string
-  default     = "celestial-vault-archive" 
+  default     = "celestial-vault-archive" # Fun and globally unique!
 }
 
 # Outputs for easy access to resource names
@@ -354,12 +373,12 @@ output "input_bucket_name" {
   value       = aws_s3_bucket.input_files_bucket.bucket
 }
 
-output "output_bucket_name" { 
+output "output_bucket_name" {
   description = "Name of the S3 bucket for processed output results."
   value       = aws_s3_bucket.output_results_bucket.bucket
 }
 
-output "lambda_code_bucket_name" { 
+output "lambda_code_bucket_name" {
   description = "Name of the S3 bucket for Lambda deployment code."
   value       = aws_s3_bucket.lambda_code_bucket.bucket
 }
