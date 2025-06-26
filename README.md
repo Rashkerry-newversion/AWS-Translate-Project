@@ -216,11 +216,6 @@ git remote add origin https://github.com/your_username/lingobotic-app.git
 git push -u origin main
 ```
 
-**Screenshot:**
-```markdown
-![Step – Push to GitHub](images/github.png)
-```
-
 ---
 
 ## ✅ Summary
